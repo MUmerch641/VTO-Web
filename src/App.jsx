@@ -4,13 +4,16 @@ import axios from 'axios';
 const App = () => {
   const [garmentImage, setGarmentImage] = useState(null);
   const [userImage, setUserImage] = useState(null);
+  const [backgroundImage, setBackgroundImage] = useState(null); // New state for background image
   const [garmentImageUrl, setGarmentImageUrl] = useState('');
   const [personImageUrl, setPersonImageUrl] = useState('');
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState(''); // URL for background image
   const [resultImage, setResultImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [removingBackground, setRemovingBackground] = useState(false);
   const [noBackgroundImage, setNoBackgroundImage] = useState(null);
+  const [finalImage, setFinalImage] = useState(null); // Final composited image
   const apiKey = 'sk_81e10189b9dc4824912def2ef83876c8';
   const cloudinaryUploadPreset = 'chatApp';
   const cloudinaryCloudName = 'dajvx37wu';
@@ -19,7 +22,6 @@ const App = () => {
   const uploadImage = async (file) => {
     if (!file) return null;
 
-    // Validate file size (< 25MB) and resolution (256x256px to 1920x1920px)
     if (file.size > 25 * 1024 * 1024) {
       throw new Error('Image size exceeds 25MB limit.');
     }
@@ -47,7 +49,6 @@ const App = () => {
     }
   };
 
-  // Function to convert URL to File object
   const urlToFile = async (url, filename) => {
     const response = await fetch(url);
     const blob = await response.blob();
@@ -82,6 +83,20 @@ const App = () => {
     }
   };
 
+  const handleBackgroundChange = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setBackgroundImage(file);
+      try {
+        const url = await uploadImage(file);
+        setBackgroundImageUrl(url);
+        setError(null);
+      } catch (err) {
+        setError(err.message);
+      }
+    }
+  };
+
   const handleTryOn = async () => {
     if (!garmentImageUrl || !personImageUrl) {
       setError('Please upload both a garment image and a user image.');
@@ -91,6 +106,7 @@ const App = () => {
     setLoading(true);
     setError(null);
     setNoBackgroundImage(null);
+    setFinalImage(null);
 
     try {
       const response = await axios.post(
@@ -133,13 +149,9 @@ const App = () => {
     setError(null);
 
     try {
-      // Convert the result image URL to a File object for processing
       const resultFile = await urlToFile(resultImage, 'result-image.jpg');
-      
-      // Upload the result image to get a processable URL
       const resultUploadUrl = await uploadImage(resultFile);
-      
-      // Use a background removal API (example with remove.bg API)
+
       const response = await axios.post(
         'https://api.remove.bg/v1.0/removebg',
         {
@@ -155,17 +167,56 @@ const App = () => {
         }
       );
 
-      // Convert the arraybuffer to a base64 string (browser-compatible approach)
       const arrayBufferView = new Uint8Array(response.data);
       const blob = new Blob([arrayBufferView], { type: 'image/png' });
       const imageUrl = URL.createObjectURL(blob);
-      
       setNoBackgroundImage(imageUrl);
     } catch (err) {
       setError('Failed to remove background: ' + (err.message || 'Unknown error'));
     } finally {
       setRemovingBackground(false);
     }
+  };
+
+  const applyBackground = () => {
+    if (!noBackgroundImage || !backgroundImageUrl) {
+      setError('Please remove the background and upload a background image first.');
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const foregroundImg = new Image();
+    const backgroundImg = new Image();
+
+    foregroundImg.crossOrigin = 'Anonymous';
+    backgroundImg.crossOrigin = 'Anonymous';
+
+    foregroundImg.src = noBackgroundImage;
+    backgroundImg.src = backgroundImageUrl;
+
+    Promise.all([
+      new Promise((resolve) => (foregroundImg.onload = resolve)),
+      new Promise((resolve) => (backgroundImg.onload = resolve)),
+    ])
+      .then(() => {
+        // Set canvas size to match the foreground image
+        canvas.width = foregroundImg.width;
+        canvas.height = foregroundImg.height;
+
+        // Draw background first (scaled to fit canvas)
+        ctx.drawImage(backgroundImg, 0, 0, canvas.width, canvas.height);
+        // Draw foreground on top
+        ctx.drawImage(foregroundImg, 0, 0);
+
+        // Convert to data URL and set as final image
+        const finalImageUrl = canvas.toDataURL('image/png');
+        setFinalImage(finalImageUrl);
+      })
+      .catch((err) => {
+        setError('Failed to apply background: ' + err.message);
+      });
   };
 
   return (
@@ -176,21 +227,19 @@ const App = () => {
             Virtual Try-On
           </h1>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {/* Garment Upload Section */}
             <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
               <h3 className="text-lg font-medium text-gray-800 mb-4">Select Garment</h3>
-              <div className="flex items-center justify-center">
-                <label className="flex flex-col items-center px-4 py-6 bg-white rounded-lg shadow-lg tracking-wide border border-blue-200 cursor-pointer hover:bg-blue-50 transition duration-300 w-full">
-                  <span className="text-sm text-gray-600">Choose a garment image</span>
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    onChange={handleGarmentChange} 
-                    className="hidden" 
-                  />
-                </label>
-              </div>
+              <label className="flex flex-col items-center px-4 py-6 bg-white rounded-lg shadow-lg tracking-wide border border-blue-200 cursor-pointer hover:bg-blue-50 transition duration-300 w-full">
+                <span className="text-sm text-gray-600">Choose a garment image</span>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  onChange={handleGarmentChange} 
+                  className="hidden" 
+                />
+              </label>
               {garmentImage && (
                 <div className="mt-4 flex justify-center">
                   <div className="relative">
@@ -213,17 +262,15 @@ const App = () => {
             {/* User Upload Section */}
             <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
               <h3 className="text-lg font-medium text-gray-800 mb-4">Upload Your Picture</h3>
-              <div className="flex items-center justify-center">
-                <label className="flex flex-col items-center px-4 py-6 bg-white rounded-lg shadow-lg tracking-wide border border-blue-200 cursor-pointer hover:bg-blue-50 transition duration-300 w-full">
-                  <span className="text-sm text-gray-600">Choose your photo</span>
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    onChange={handleUserImageChange} 
-                    className="hidden" 
-                  />
-                </label>
-              </div>
+              <label className="flex flex-col items-center px-4 py-6 bg-white rounded-lg shadow-lg tracking-wide border border-blue-200 cursor-pointer hover:bg-blue-50 transition duration-300 w-full">
+                <span className="text-sm text-gray-600">Choose your photo</span>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  onChange={handleUserImageChange} 
+                  className="hidden" 
+                />
+              </label>
               {userImage && (
                 <div className="mt-4 flex justify-center">
                   <div className="relative">
@@ -242,10 +289,41 @@ const App = () => {
                 </div>
               )}
             </div>
+
+            {/* Background Upload Section */}
+            <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
+              <h3 className="text-lg font-medium text-gray-800 mb-4">Upload Background</h3>
+              <label className="flex flex-col items-center px-4 py-6 bg-white rounded-lg shadow-lg tracking-wide border border-blue-200 cursor-pointer hover:bg-blue-50 transition duration-300 w-full">
+                <span className="text-sm text-gray-600">Choose a background image</span>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  onChange={handleBackgroundChange} 
+                  className="hidden" 
+                />
+              </label>
+              {backgroundImage && (
+                <div className="mt-4 flex justify-center">
+                  <div className="relative">
+                    <img
+                      src={URL.createObjectURL(backgroundImage)}
+                      alt="Background Preview"
+                      className="h-48 w-auto object-contain rounded-lg"
+                    />
+                    <button 
+                      onClick={() => setBackgroundImage(null)} 
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Button Section */}
-          <div className="flex justify-center mt-8">
+          <div className="flex justify-center mt-8 space-x-4">
             <button
               onClick={handleTryOn}
               disabled={loading || !garmentImage || !userImage}
@@ -257,21 +335,38 @@ const App = () => {
             >
               {loading ? 'Processing...' : 'Apply Garment'}
             </button>
+            {resultImage && (
+              <button
+                onClick={handleRemoveBackground}
+                disabled={removingBackground}
+                className={`${
+                  removingBackground
+                    ? 'bg-green-300 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700'
+                } px-6 py-3 text-white rounded-lg font-medium shadow-md transition duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500`}
+              >
+                {removingBackground ? 'Processing...' : 'Remove Background'}
+              </button>
+            )}
+            {noBackgroundImage && backgroundImageUrl && (
+              <button
+                onClick={applyBackground}
+                className="bg-blue-600 hover:bg-blue-700 px-6 py-3 text-white rounded-lg font-medium shadow-md transition duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Apply Background
+              </button>
+            )}
           </div>
 
           {/* Error Message */}
           {error && (
             <div className="mt-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-md">
-              <div className="flex">
-                <div className="ml-3">
-                  <p className="text-sm text-red-700">{error}</p>
-                </div>
-              </div>
+              <p className="text-sm text-red-700">{error}</p>
             </div>
           )}
 
           {/* Result Image */}
-          {resultImage && !noBackgroundImage && (
+          {resultImage && !noBackgroundImage && !finalImage && (
             <div className="mt-8">
               <h3 className="text-lg font-medium text-gray-800 mb-4 text-center">Result</h3>
               <div className="flex justify-center">
@@ -279,10 +374,10 @@ const App = () => {
                   src={resultImage}
                   alt="Try-On Result"
                   className="max-w-full h-auto rounded-lg shadow-lg"
-                  onError={() => setError('Failed to load result image. The URL might be invalid or expired.')}
+                  onError={() => setError('Failed to load result image.')}
                 />
               </div>
-              <div className="mt-4 flex justify-center space-x-4">
+              <div className="mt-4 flex justify-center">
                 <a
                   href={resultImage}
                   download="virtual-tryon-result.jpg"
@@ -290,23 +385,12 @@ const App = () => {
                 >
                   Download Result
                 </a>
-                <button
-                  onClick={handleRemoveBackground}
-                  disabled={removingBackground}
-                  className={`${
-                    removingBackground
-                      ? 'bg-green-300 cursor-not-allowed'
-                      : 'bg-green-600 hover:bg-green-700'
-                  } px-4 py-2 text-white rounded-lg font-medium shadow-md transition duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500`}
-                >
-                  {removingBackground ? 'Processing...' : 'Remove Background'}
-                </button>
               </div>
             </div>
           )}
 
           {/* No Background Result Image */}
-          {noBackgroundImage && (
+          {noBackgroundImage && !finalImage && (
             <div className="mt-8">
               <h3 className="text-lg font-medium text-gray-800 mb-4 text-center">Background Removed</h3>
               <div className="flex justify-center">
@@ -314,7 +398,7 @@ const App = () => {
                   src={noBackgroundImage}
                   alt="Background Removed Result"
                   className="max-w-full h-auto rounded-lg shadow-lg"
-                  style={{ backgroundColor: '#f0f0f0' }} // Light background to show transparency
+                  style={{ backgroundColor: '#f0f0f0' }}
                 />
               </div>
               <div className="mt-4 flex justify-center space-x-4">
@@ -330,6 +414,35 @@ const App = () => {
                   className="text-gray-600 hover:text-gray-800 transition"
                 >
                   Back to Original Result
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Final Image with Background */}
+          {finalImage && (
+            <div className="mt-8">
+              <h3 className="text-lg font-medium text-gray-800 mb-4 text-center">Final Image with Background</h3>
+              <div className="flex justify-center">
+                <img
+                  src={finalImage}
+                  alt="Final Result with Background"
+                  className="max-w-full h-auto rounded-lg shadow-lg"
+                />
+              </div>
+              <div className="mt-4 flex justify-center space-x-4">
+                <a
+                  href={finalImage}
+                  download="virtual-tryon-with-background.png"
+                  className="text-indigo-600 hover:text-indigo-800 transition"
+                >
+                  Download Final Image
+                </a>
+                <button
+                  onClick={() => setFinalImage(null)}
+                  className="text-gray-600 hover:text-gray-800 transition"
+                >
+                  Back to No-Background Result
                 </button>
               </div>
             </div>
