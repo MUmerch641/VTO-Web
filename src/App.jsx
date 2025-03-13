@@ -9,6 +9,8 @@ const App = () => {
   const [resultImage, setResultImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [removingBackground, setRemovingBackground] = useState(false);
+  const [noBackgroundImage, setNoBackgroundImage] = useState(null);
   const apiKey = 'sk_81e10189b9dc4824912def2ef83876c8';
   const cloudinaryUploadPreset = 'chatApp';
   const cloudinaryCloudName = 'dajvx37wu';
@@ -43,6 +45,13 @@ const App = () => {
     } catch (err) {
       throw new Error('Failed to upload image to Cloudinary: ' + err.message);
     }
+  };
+
+  // Function to convert URL to File object
+  const urlToFile = async (url, filename) => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new File([blob], filename, { type: blob.type });
   };
 
   const handleGarmentChange = async (e) => {
@@ -81,6 +90,7 @@ const App = () => {
 
     setLoading(true);
     setError(null);
+    setNoBackgroundImage(null);
 
     try {
       const response = await axios.post(
@@ -110,6 +120,51 @@ const App = () => {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRemoveBackground = async () => {
+    if (!resultImage) {
+      setError('No result image to process.');
+      return;
+    }
+
+    setRemovingBackground(true);
+    setError(null);
+
+    try {
+      // Convert the result image URL to a File object for processing
+      const resultFile = await urlToFile(resultImage, 'result-image.jpg');
+      
+      // Upload the result image to get a processable URL
+      const resultUploadUrl = await uploadImage(resultFile);
+      
+      // Use a background removal API (example with remove.bg API)
+      const response = await axios.post(
+        'https://api.remove.bg/v1.0/removebg',
+        {
+          image_url: resultUploadUrl,
+          size: 'auto',
+        },
+        {
+          headers: {
+            'X-Api-Key': 'm99BxhZtR5LPqqzc6zz7Vtr9', // Replace with your remove.bg API key
+            'Content-Type': 'application/json',
+          },
+          responseType: 'arraybuffer',
+        }
+      );
+
+      // Convert the arraybuffer to a base64 string (browser-compatible approach)
+      const arrayBufferView = new Uint8Array(response.data);
+      const blob = new Blob([arrayBufferView], { type: 'image/png' });
+      const imageUrl = URL.createObjectURL(blob);
+      
+      setNoBackgroundImage(imageUrl);
+    } catch (err) {
+      setError('Failed to remove background: ' + (err.message || 'Unknown error'));
+    } finally {
+      setRemovingBackground(false);
     }
   };
 
@@ -216,7 +271,7 @@ const App = () => {
           )}
 
           {/* Result Image */}
-          {resultImage && (
+          {resultImage && !noBackgroundImage && (
             <div className="mt-8">
               <h3 className="text-lg font-medium text-gray-800 mb-4 text-center">Result</h3>
               <div className="flex justify-center">
@@ -227,7 +282,7 @@ const App = () => {
                   onError={() => setError('Failed to load result image. The URL might be invalid or expired.')}
                 />
               </div>
-              <div className="mt-4 text-center">
+              <div className="mt-4 flex justify-center space-x-4">
                 <a
                   href={resultImage}
                   download="virtual-tryon-result.jpg"
@@ -235,6 +290,47 @@ const App = () => {
                 >
                   Download Result
                 </a>
+                <button
+                  onClick={handleRemoveBackground}
+                  disabled={removingBackground}
+                  className={`${
+                    removingBackground
+                      ? 'bg-green-300 cursor-not-allowed'
+                      : 'bg-green-600 hover:bg-green-700'
+                  } px-4 py-2 text-white rounded-lg font-medium shadow-md transition duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500`}
+                >
+                  {removingBackground ? 'Processing...' : 'Remove Background'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* No Background Result Image */}
+          {noBackgroundImage && (
+            <div className="mt-8">
+              <h3 className="text-lg font-medium text-gray-800 mb-4 text-center">Background Removed</h3>
+              <div className="flex justify-center">
+                <img
+                  src={noBackgroundImage}
+                  alt="Background Removed Result"
+                  className="max-w-full h-auto rounded-lg shadow-lg"
+                  style={{ backgroundColor: '#f0f0f0' }} // Light background to show transparency
+                />
+              </div>
+              <div className="mt-4 flex justify-center space-x-4">
+                <a
+                  href={noBackgroundImage}
+                  download="virtual-tryon-no-background.png"
+                  className="text-indigo-600 hover:text-indigo-800 transition"
+                >
+                  Download No-Background Result
+                </a>
+                <button
+                  onClick={() => setNoBackgroundImage(null)}
+                  className="text-gray-600 hover:text-gray-800 transition"
+                >
+                  Back to Original Result
+                </button>
               </div>
             </div>
           )}
